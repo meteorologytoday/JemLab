@@ -1,6 +1,6 @@
 # JemLab
 
-This project is a testbed for [JAX-ESM (JEM)](https://github.com/climate-analytics-lab/jax-esm) runs. The latest version couples the atmosphere model [JAX-GCM (JCM)](https://github.com/climate-analytics-lab/jax-gcm), ocean model Veros, and Winton sea-ice model, and a slab land model in a realistic-topography setup. 
+This project is a testbed for [JAX-ESM (JEM)](https://github.com/climate-analytics-lab/jax-esm) runs. The latest version couples the atmosphere model [JAX-GCM (JCM)](https://github.com/climate-analytics-lab/jax-gcm), [jittable version ocean model Veros](https://github.com/meteorologytoday/veros-jittable), and Winton sea-ice model (within JEM), and a slab land model (within JEM) in a realistic-topography generated from [EarthSystemGrid.py](https://github.com/meteorologytoday/EarthSystemGrids.py) setup.
 
 # Quickstart
 
