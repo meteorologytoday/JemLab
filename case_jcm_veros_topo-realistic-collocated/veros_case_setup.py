@@ -130,18 +130,17 @@ class GridInfo:
         true_lat = grid_ds["grid_center_lat"].to_numpy().reshape(ny, nx)
         true_lat_xy = true_lat.transpose()  # (j, i) -> (xt, yt)
 
-        # TODO: real bathymetry is still needed here -- this only gives a
-        # binary land/sea mask, so every ocean column gets the same flat
-        # bottom depth (kbot) rather than actual varying ocean depth.
         # Cleaned binary land-sea mask on the same SCRIP grid (the
-        # `sfc_topo_*.nc` file of EarthSystemGrids' preprocessing_workflow);
+        # `ocn_topo_*.nc` file of EarthSystemGrids' preprocessing_workflow);
         # convention: 1 = land. Used as is, so Veros agrees cell for cell
         # with the "ocn"/"lnd" domain split in domain.get_domain_master.
         mask_ds = xr.open_dataset(self.landsea_mask_file)
         is_land = mask_ds["landsea_mask"].to_numpy().reshape(ny, nx) == 1
         landsea_mask = (1 - is_land.astype(int)).transpose()  # -> ocean=1/land=0, (xt, yt); Veros kbot wants 0 = land
-        bathymetry = mask_ds["bathymetry"].to_numpy().transpose()
-        
+        # Seafloor height (m, negative below sea level, 0 over land) from
+        # the same file; ocean cells are already at least `min_depth` deep.
+        bathymetry = mask_ds["bathymetry"].to_numpy().reshape(ny, nx).transpose()  # (xt, yt)
+
         self.nx = nx
         self.ny = ny
         self.dyt = dyt
@@ -295,13 +294,30 @@ def generateVerosSetup(
         @veros_routine
         def set_topography(self, state):
             vs = state.variables
+            settings = state.settings
             x, y = npx.meshgrid(vs.xt, vs.yt, indexing="ij")
 
-            vs.kbot = npx.zeros_like(x)
+            # As in veros' global_4deg setup, a layer is dry when its centre
+            # lies at or below the seafloor, and kbot is the 1-based index of
+            # the lowest wet layer (layers are bottom-first). The centre is
+            # the layer midpoint `zw - dzt/2` (`zw` is each layer's top
+            # face), not `zt`: on a stretched grid veros reconstructs `zt`
+            # by alternating reflection about the faces, which zigzags
+            # ~10 m around the midpoints near the surface. Ocean columns
+            # shallower than the top layer's centre still keep one wet layer
+            # (kbot = nz) rather than turning into land, so the ocean mask
+            # stays identical to the land-sea mask the coupler splits the
+            # "ocn"/"lnd" domains with. Columns deeper than the grid simply
+            # reach the bottom (kbot = 1).
+            z_mid = vs.zw - 0.5 * vs.dzt
+            dry = z_mid[npx.newaxis, npx.newaxis, :] <= grid_info.bathymetry[..., npx.newaxis]
+            kbot_ocean = npx.minimum(1 + npx.sum(dry.astype("int"), axis=2), settings.nz)
+
+            vs.kbot = npx.zeros_like(x, dtype="int")
             vs.kbot = update(
                 vs.kbot,
                 at[2:-2, 2:-2],
-                grid_info.landsea_mask,
+                grid_info.landsea_mask * kbot_ocean,
             )
 
 
