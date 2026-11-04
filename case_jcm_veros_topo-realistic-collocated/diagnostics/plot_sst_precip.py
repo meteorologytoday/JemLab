@@ -1,4 +1,4 @@
-"""SST and precipitation of one JEM run vs ERA5, side by side.
+"""SST, precipitation and mixed layer depth of one JEM run, side by side, vs ERA5.
 
 Left column: surface temperature (SST over ocean, land surface temperature over
 land; ERA5 sst/stl), ERA5, model minus ERA5, and equatorial (5S-5N) SST vs
@@ -6,6 +6,10 @@ longitude. The magenta line is the 0 degC SST contour (ocean only).
 Right column: total JCM precipitation (precnv + precls), ERA5 (annual mean of
 monthly `tp`, interpolated to the model grid), model minus ERA5, and the zonal
 mean of both.
+Third column (unless --no-mld): mixed layer depth from a density threshold
+(diagnostics/mld.py): winter (each year's deepest 73-day chunk) and annual-mean
+maps, a table of regional means, and the zonal means. It needs complete years
+of five chunks; a trailing partial year of the window is left out of it.
 
 The mean is over the run's last N years (default 1), or over an explicit
 range of 73-day chunks. Reads the run's ocn-/lnd-/atm-*.nc output.
@@ -20,6 +24,9 @@ import numpy as np, xarray as xr
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
+from matplotlib.colors import BoundaryNorm
+
+from mld import CHUNKS_PER_YEAR, DEFAULT_THRESHOLD, MixedLayer
 
 CHUNK_DAYS = 73
 FREEZE_LINE = 0.0   # highlighted SST contour, degC
@@ -35,6 +42,9 @@ parser.add_argument("--era5-sst", default="forcing_era5_t31.nc",
                     help="ERA5 climatology on the model grid with sst, stl and landsea_mask (default: %(default)s).")
 parser.add_argument("--era5-tp", default="/p/tmp/tienyiao/era5_tp/era5_tp_monthly_1971-2000_1deg.nc",
                     help="ERA5 monthly total precipitation tp in m/day (default: %(default)s).")
+parser.add_argument("--no-mld", action="store_true", help="Leave out the mixed layer depth column.")
+parser.add_argument("--mld-threshold", type=float, default=DEFAULT_THRESHOLD,
+                    help="Density threshold of the mixed layer depth in kg/m3 (default %(default)s).")
 args = parser.parse_args()
 era_file, tp_file, out_png, rd = args.era5_sst, args.era5_tp, args.out_png, args.run_dir
 
@@ -98,17 +108,31 @@ def eq_profile(da):
         return np.nansum(x * ww, 0) / np.where(np.isfinite(x), ww, 0).sum(0)
 
 
+with_mld = not args.no_mld
+mld_files = files[:len(files) // CHUNKS_PER_YEAR * CHUNKS_PER_YEAR]
+if with_mld and not mld_files:
+    print("window shorter than a year: no mixed layer depth column")
+    with_mld = False
+if with_mld:
+    ml = MixedLayer(files[0], args.mld_threshold)
+    mld_winter, mld_annual = ml.winter_and_annual(mld_files)
+ncol = 3 if with_mld else 2
+
 proj, pc = ccrs.Robinson(central_longitude=180), ccrs.PlateCarree()
-fig = plt.figure(figsize=(14, 14.5))
+fig = plt.figure(figsize=(7 * ncol, 14.5))
 lev, dlev = np.arange(-30, 36, 2), np.arange(-10, 11, 1)
 plev = [0, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15]
 pdlev = [-8, -6, -4, -3, -2, -1, -0.5, 0.5, 1, 2, 3, 4, 6, 8]
 
 
-def map_panel(k, field, levels, cmap, extend, title, unit, sst_field=None, zero_line=False):
-    ax = fig.add_subplot(4, 2, k, projection=proj)
+def map_panel(row, col, field, levels, cmap, extend, title, unit, sst_field=None, zero_line=False, cells=False):
+    ax = fig.add_subplot(4, ncol, row * ncol + col + 1, projection=proj)
     lo, v = cyc(field)
-    cf = ax.contourf(lo, lat, v, levels=levels, cmap=cmap, extend=extend, transform=pc)
+    if cells:   # cell by cell, with a stepped colour scale (for fields like the mixed layer depth)
+        cf = ax.pcolormesh(lo, lat, v, cmap=cmap, norm=BoundaryNorm(levels, plt.get_cmap(cmap).N),
+                           shading="nearest", transform=pc)
+    else:
+        cf = ax.contourf(lo, lat, v, levels=levels, cmap=cmap, extend=extend, transform=pc)
     if zero_line:
         ax.contour(lo, lat, v, levels=[0], colors="k", linewidths=0.5, transform=pc)
     if sst_field is not None:
@@ -122,19 +146,19 @@ def map_panel(k, field, levels, cmap, extend, title, unit, sst_field=None, zero_
 
 period = f"{str(t[0])[:7]} – {str(t[-1])[:7]}, model years {d_first / 365:.0f}–{d_last / 365:.0f}"
 dsst, dlst, dpr = sst - era_sst, lst - era_lst, pr - era_pr
-map_panel(1, tsfc, lev, "RdYlBu_r", "both",
+map_panel(0, 0, tsfc, lev, "RdYlBu_r", "both",
           f"{name}: SST + land T ({period})\n[ocean {gmean(sst):.1f} °C, land {gmean(lst):.1f} °C; magenta: SST = 0 °C]",
           "°C", sst_field=sst)
-map_panel(2, pr, plev, "YlGnBu", "max", f"{name}: total precipitation\n[global {gmean(pr):.2f} mm/day]", "mm/day")
-map_panel(3, era_tsfc, lev, "RdYlBu_r", "both",
+map_panel(0, 1, pr, plev, "YlGnBu", "max", f"{name}: total precipitation\n[global {gmean(pr):.2f} mm/day]", "mm/day")
+map_panel(1, 0, era_tsfc, lev, "RdYlBu_r", "both",
           f"ERA5 annual-mean sst + stl\n[ocean {gmean(era_sst):.1f} °C, land {gmean(era_lst):.1f} °C]", "°C", sst_field=era_sst)
-map_panel(4, era_pr, plev, "YlGnBu", "max", f"ERA5 1971–2000 annual-mean precipitation\n[global {gmean(era_pr):.2f} mm/day]", "mm/day")
-map_panel(5, tsfc - era_tsfc, dlev, "RdBu_r", "both",
+map_panel(1, 1, era_pr, plev, "YlGnBu", "max", f"ERA5 1971–2000 annual-mean precipitation\n[global {gmean(era_pr):.2f} mm/day]", "mm/day")
+map_panel(2, 0, tsfc - era_tsfc, dlev, "RdBu_r", "both",
           f"minus ERA5  RMSE [ocean {np.sqrt(gmean(dsst ** 2)):.2f} °C, land {np.sqrt(gmean(dlst ** 2)):.2f} °C]", "°C", zero_line=True)
-map_panel(6, dpr, pdlev, "BrBG", "both",
+map_panel(2, 1, dpr, pdlev, "BrBG", "both",
           f"minus ERA5  [{gmean(dpr):+.2f} mm/day, RMS {np.sqrt(gmean(dpr ** 2)):.2f}]", "mm/day")
 
-ax = fig.add_subplot(4, 2, 7)
+ax = fig.add_subplot(4, ncol, 3 * ncol + 1)
 ax.plot(lon, eq_profile(sst), color="C0", label="model")
 ax.plot(lon, eq_profile(era_sst), color="k", ls="--", label="ERA5")
 ax.axvspan(120, 280, color="0.92", zorder=0)
@@ -142,12 +166,46 @@ ax.set_xlim(0, 360); ax.set_xticks(range(0, 361, 60)); ax.grid(alpha=0.3)
 ax.set_xlabel("longitude (°E)"); ax.set_ylabel("SST, 5°S–5°N (°C)"); ax.legend(fontsize=8)
 ax.set_title("Equatorial SST (shaded: Pacific 120–280°E)", fontsize=9)
 
-ax = fig.add_subplot(4, 2, 8)
+ax = fig.add_subplot(4, ncol, 3 * ncol + 2)
 ax.plot(lat, np.nanmean(np.asarray(pr), 1), color="C0", label="model")
 ax.plot(lat, np.nanmean(np.asarray(era_pr), 1), color="k", ls="--", label="ERA5")
 ax.set_xlim(-90, 90); ax.set_xticks(range(-90, 91, 30)); ax.grid(alpha=0.3)
 ax.set_xlabel("latitude"); ax.set_ylabel("mm/day"); ax.legend(fontsize=8)
 ax.set_title("Zonal-mean precipitation", fontsize=9)
+
+if with_mld:
+    mlev = [0, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 4000, 5500]
+    nyr = len(mld_files) // CHUNKS_PER_YEAR
+    mld_years = (f"model years {int(os.path.basename(mld_files[0])[4:12]) / 365:.0f}–"
+                 f"{(int(os.path.basename(mld_files[-1])[4:12]) + CHUNK_DAYS) / 365:.0f}")
+    map_panel(0, 2, mld_winter, mlev, "viridis_r", "max",
+              f"{name}: mixed layer depth, winter\n(deepest 73-day chunk of each year; {mld_years})", "m", cells=True)
+    map_panel(1, 2, mld_annual, mlev, "viridis_r", "max",
+              f"{name}: mixed layer depth, annual mean\n(Δρ = {args.mld_threshold:g} kg/m³ from the top layer)", "m", cells=True)
+    LA, LO = np.meshgrid(ml.lat, ml.lon, indexing="ij")
+    regions = {"subpolar N Pacific 45–60N, 140–235E": (LA >= 45) & (LA <= 60) & (LO >= 140) & (LO <= 235),
+               "subpolar N Atlantic 50–65N, 300–350E": (LA >= 50) & (LA <= 65) & (LO >= 300) & (LO <= 350),
+               "Southern Ocean 65–50S": (LA >= -65) & (LA <= -50),
+               "tropics 20S–20N": np.abs(LA) <= 20}
+    mw = np.cos(np.deg2rad(ml.lat))[:, None] * np.ones((1, len(ml.lon)))
+    rows = []
+    for label, m in regions.items():
+        m = m & ml.ocean
+        rmean = lambda x: np.nansum((x * mw)[m]) / np.sum(mw[m])
+        rows.append([label, f"{rmean(mld_winter):.0f}", f"{np.nanmax(mld_winter[m]):.0f}", f"{rmean(mld_annual):.0f}"])
+        print(f"  MLD {label}: winter {rows[-1][1]} m (deepest {rows[-1][2]} m), annual {rows[-1][3]} m")
+    ax = fig.add_subplot(4, ncol, 2 * ncol + 3); ax.axis("off")
+    table = ax.table(cellText=rows, colLabels=["region", "winter (m)", "deepest (m)", "annual (m)"],
+                     loc="center", cellLoc="center", colWidths=[0.5, 0.17, 0.17, 0.17])
+    table.auto_set_font_size(False); table.set_fontsize(8); table.scale(1, 1.6)
+    ax.set_title("Mixed layer depth, regional means", fontsize=9)
+    ax = fig.add_subplot(4, ncol, 3 * ncol + 3)
+    zm = lambda x: np.nanmean(np.where(ml.ocean, x, np.nan), axis=1)
+    ax.plot(ml.lat, zm(mld_winter), color="C0", label="winter")
+    ax.plot(ml.lat, zm(mld_annual), color="C1", label="annual mean")
+    ax.set_yscale("log"); ax.invert_yaxis(); ax.set_xlim(-90, 90); ax.set_xticks(range(-90, 91, 30))
+    ax.grid(alpha=0.3, which="both"); ax.set_xlabel("latitude"); ax.set_ylabel("depth (m)"); ax.legend(fontsize=8)
+    ax.set_title("Zonal-mean mixed layer depth (ocean cells)", fontsize=9)
 
 fig.tight_layout()
 fig.savefig(out_png, dpi=100)
