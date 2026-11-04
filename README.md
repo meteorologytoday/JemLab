@@ -11,18 +11,18 @@ git clone -b fix-sea-ice-temperature-blending https://github.com/climate-analyti
 git clone -b dev0.1 https://github.com/climate-analytics-lab/jax-esm.git
 git clone https://github.com/meteorologytoday/veros-jittable.git
 
-jcm\_path=`pwd`/jcm
-jem\_path=`pwd`/jax-esm
-veros\_path=`pwd`/veros-jittable
+jcm_path=`pwd`/jcm
+jem_path=`pwd`/jax-esm
+veros_path=`pwd`/veros-jittable
 
-export PYTHONPATH=$jcm\_path:$jem\_path:$veros\_path
+export PYTHONPATH=$jcm_path:$jem_path:$veros_path
 ```
 
 Run
 
 ```
 git clone -b dev0.1 https://github.com/meteorologytoday/UnicornESM.git
-cd UnicornESM/case\_jcm\_veros\_topo-realistic-collocated
+cd UnicornESM/case_jcm_veros_topo-realistic-collocated
 bash run.sh
 ```
 
