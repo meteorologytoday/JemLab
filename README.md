@@ -1,6 +1,6 @@
-# JemLab (Temporary)
+# JemLab
 
-This project couples the atmosphere model JAX-GCM (JCM), ocean model Veros, and Winton sea-ice model, and a slab land model together through JAX-ESM (JEM), in a realistic-topography setup. 
+This project is a testbed for [JAX-ESM (JEM)](https://github.com/climate-analytics-lab/jax-esm) runs. The latest version couples the atmosphere model [JAX-GCM (JCM)](https://github.com/climate-analytics-lab/jax-gcm), ocean model Veros, and Winton sea-ice model, and a slab land model in a realistic-topography setup. 
 
 # Quickstart
 
