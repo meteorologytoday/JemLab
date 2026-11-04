@@ -1,4 +1,4 @@
-# UnicornESM (Temporary)
+# JemLab (Temporary)
 
 This project couples the atmosphere model JAX-GCM (JCM), ocean model Veros, and Winton sea-ice model, and a slab land model together through JAX-ESM (JEM), in a realistic-topography setup. 
 
@@ -20,8 +20,8 @@ export PYTHONPATH=$jcm_path:$jem_path:$veros_path
 
 Run
 ```
-git clone -b dev0.1 https://github.com/meteorologytoday/UnicornESM.git
-cd UnicornESM/case_jcm_veros_topo-realistic-collocated
+git clone -b dev0.1 https://github.com/meteorologytoday/JemLab.git
+cd JemLab/case_jcm_veros_topo-realistic-collocated
 bash run.sh
 ```
 
