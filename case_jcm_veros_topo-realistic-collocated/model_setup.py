@@ -37,7 +37,6 @@ from jem.components import (
 from jem.components.veros_component import GHOST_CELLS, SEAWATER_HEAT_CAPACITY
 from veros_case_setup import generateVerosSetup
 from veros.core.operators import update, at
-from domain import get_domain_master
 
 def is_pytree_all_finite(tree):
     return jax.tree_util.tree_reduce(

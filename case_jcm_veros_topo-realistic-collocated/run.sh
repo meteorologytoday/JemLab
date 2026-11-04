@@ -3,7 +3,7 @@
 grid_folder=../data/grid_ESM_collocated
 land_forcing_file=$grid_folder/forcing_era5_t31_gridlat.nc
 
-python3 -c "import jcm; import jem; import veros; print("jcm : ", jcm.__file__); print("jem: ", jem.__file__); print("veros : ", veros.__file__)"
+python3 -c 'import jcm; import jem; import veros; print("jcm : ", jcm.__file__); print("jem: ", jem.__file__); print("veros : ", veros.__file__);'
 time python3 main_forward.py \
     --total-simulation-days $(( 365 * 5 ))          \
     --simulation-interval-days 73                   \
