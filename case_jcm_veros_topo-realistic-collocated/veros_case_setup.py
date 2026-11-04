@@ -159,10 +159,16 @@ def generateVerosSetup(
     dt_mom: float = 1800.0,
     dt_tracer: float = 1800.0,
     cold_start_ocean_temperature_reference_K: float = 10.0,
+    initial_temp_salt: tuple | None = None,
 ):
     # Cold-start temperature: a linear profile from
     # `cold_start_ocean_temperature_reference_K` (deg C despite the name) at
     # the surface to 0 at the bottom.
+    #
+    # `initial_temp_salt`, if given, replaces the cold start: a (temp, salt)
+    # pair of (nx, ny, nz) arrays in deg C and psu, layers bottom-first like
+    # Veros, already on this grid (see `_ocean_initial_condition` in
+    # model_setup.py).
 
     grid_info = GridInfo(
         rotated_grid = rotated_grid,
@@ -349,6 +355,16 @@ def generateVerosSetup(
                 at[...],
                 ((35.0 + deltaS_psu / 2 - deltaS_psu * depth_factor) * vs.maskT)[..., None],
             )
+
+            if initial_temp_salt is not None:
+                # Ghost cells too: cyclic in longitude, edge rows repeated
+                # beyond the southern and northern boundaries.
+                def with_ghosts(field):
+                    field = np.pad(field, ((2, 2), (0, 0), (0, 0)), mode="wrap")
+                    return np.pad(field, ((0, 0), (2, 2), (0, 0)), mode="edge")
+                initial_temp, initial_salt = (with_ghosts(field) for field in initial_temp_salt)
+                vs.temp = update(vs.temp, at[...], (initial_temp * vs.maskT)[..., None])
+                vs.salt = update(vs.salt, at[...], (initial_salt * vs.maskT)[..., None])
 
             # wind stress forcing
             yt_min = global_min(vs.yt.min())

@@ -33,6 +33,7 @@ parser.add_argument("--ocean-surface-thickness", type=float, help="Thickness (m)
 parser.add_argument("--no-shortwave-penetration", action="store_true", help="Absorb the whole solar flux in the ocean's top layer instead of spreading it over depth with the two-band exponential profile of model_setup._shortwave_penetration_divergence. Mainly a control knob for stability experiments.")
 parser.add_argument("--ocean-initial-surface-temperature", type=float, help="Surface temperature (deg C) of the cold-start ocean, a linear profile decreasing to 0 at the bottom. Ignored when resuming from a checkpoint.", default=10.0)
 parser.add_argument("--jcm-advection", type=str, choices=["semi_lagrangian", "eulerian"], help="JCM dycore transport scheme. Default: let the physics decide (SPEEDY picks Eulerian).", default=None)
+parser.add_argument("--ocean-initial-condition-file", type=str, help="Start the ocean from the temp/salt in this file (e.g. regridded WOA) instead of the --ocean-initial-surface-temperature profile. Ignored when resuming from a checkpoint.", default=None)
 parser.add_argument("--land-forcing-file", type=str, help="Forcing file for land model", default="forcing_era5_t31.nc")
 parser.add_argument("--no-seaice-transport", action="store_true", help="Keep the sea ice thermodynamic only. By default it moves with the ocean's top-layer current (plus the Winton model's lateral ice diffusion).")
 args = parser.parse_args()
@@ -69,6 +70,7 @@ model, config = build_model(
     ocean_surface_thickness = args.ocean_surface_thickness,
     enable_shortwave_penetration = not args.no_shortwave_penetration,
     ocean_initial_surface_temperature = args.ocean_initial_surface_temperature,
+    ocean_initial_condition_file = args.ocean_initial_condition_file,
     jcm_advection = args.jcm_advection,
     land_clim_file = args.land_forcing_file,
     seaice_transport = not args.no_seaice_transport,

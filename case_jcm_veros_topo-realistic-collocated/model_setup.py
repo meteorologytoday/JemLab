@@ -197,6 +197,81 @@ def _geometric_stretched_ddz(n_layers: int, surface_thickness: float, total_dept
     return [surface_thickness * ratio ** k for k in range(n_layers)]
 
 
+def _ocean_initial_condition(ic_file, ddz, mask_file):
+    """Temperature and salinity from `ic_file`, put on this model's ocean grid.
+
+    `ic_file` holds `temp` (deg C, or K) and `salt` (psu) on (z, nj, ni) with
+    layer-centre depths `z_t` (m, positive down, surface first), and
+    optionally `ocean_mask` (1 = ocean). Its horizontal grid must be the
+    model's (`mask_file`'s lat/lon); its vertical grid and its data coverage
+    need not match:
+
+    * cells with no data (NaN, or land in its `ocean_mask`) are filled, level
+      by level, from the nearest cell that has data -- this covers ocean
+      cells the model has and the file does not;
+    * a level with no data at all copies the level above (or, at the top,
+      the first level that has data);
+    * the model's layer midpoints are linearly interpolated in depth between
+      the file's levels, and take the nearest level beyond the file's range.
+
+    Returns (temp, salt) as (nx, ny, nz) arrays, layers bottom-first, as
+    `generateVerosSetup(initial_temp_salt=...)` takes them.
+    """
+    from scipy.spatial import cKDTree
+
+    ds = xr.open_dataset(ic_file)
+    model_grid = xr.open_dataset(mask_file)
+    lat, lon = model_grid["lat"].values, model_grid["lon"].values
+    same_grid = (
+        ds["lat"].shape == lat.shape
+        and np.allclose(ds["lat"].values, lat, atol=1e-3)
+        and np.allclose(np.mod(ds["lon"].values - lon + 180.0, 360.0) - 180.0, 0.0, atol=1e-3)
+    )
+    if not same_grid:
+        raise ValueError(f"{ic_file}: its lat/lon are not the model grid's ({mask_file}); regrid it first.")
+
+    z_file = ds["z_t"].values
+    ddz = np.asarray(ddz)
+    z_model = np.cumsum(ddz) - 0.5 * ddz          # layer midpoints, surface first
+    xyz = np.stack([np.cos(np.deg2rad(lat)) * np.cos(np.deg2rad(lon)),
+                    np.cos(np.deg2rad(lat)) * np.sin(np.deg2rad(lon)),
+                    np.sin(np.deg2rad(lat))], axis=-1).reshape(-1, 3)
+    file_ocean = ds["ocean_mask"].values == 1 if "ocean_mask" in ds else np.ones(lat.shape, bool)
+
+    fields = []
+    for name in ("temp", "salt"):
+        data = ds[name].transpose(..., "nj", "ni").values.astype(float)   # (z, nj, ni)
+        if name == "temp" and np.nanmax(data) > 100.0:
+            data = data - 273.15
+        has_data = np.isfinite(data) & file_ocean[None]
+        filled_cells = 0
+        for k in range(data.shape[0]):
+            if has_data[k].all():
+                continue
+            if has_data[k].any():
+                _, nearest = cKDTree(xyz[has_data[k].ravel()]).query(xyz[~has_data[k].ravel()])
+                level = data[k].ravel()
+                level[~has_data[k].ravel()] = level[has_data[k].ravel()][nearest]
+                data[k] = level.reshape(lat.shape)
+                filled_cells += int((~has_data[k]).sum())
+        levels_with_data = np.flatnonzero(has_data.any(axis=(1, 2)))
+        if levels_with_data.size == 0:
+            raise ValueError(f"{ic_file}: `{name}` has no ocean data")
+        for k in range(data.shape[0]):
+            if not has_data[k].any():
+                above = levels_with_data[levels_with_data < k]
+                data[k] = data[above[-1] if above.size else levels_with_data[0]]
+        # linear in depth, constant beyond the file's first and last level
+        k_hi = np.clip(np.searchsorted(z_file, z_model), 1, len(z_file) - 1)
+        weight = np.clip((z_model - z_file[k_hi - 1]) / (z_file[k_hi] - z_file[k_hi - 1]), 0.0, 1.0)
+        on_model_levels = (1.0 - weight)[:, None, None] * data[k_hi - 1] + weight[:, None, None] * data[k_hi]
+        print(f"ocean initial condition `{name}` from {ic_file}: {filled_cells} cell-levels without data (land included) filled from the nearest, "
+              f"{len(z_file)} file levels -> {len(z_model)} model levels "
+              f"(largest midpoint offset {np.abs(z_model[:, None] - z_file[None]).min(axis=1).max():.1f} m)")
+        fields.append(np.transpose(on_model_levels, (2, 1, 0))[..., ::-1])   # (nx, ny, nz), bottom first
+    return tuple(fields)
+
+
 def _shortwave_penetration_divergence(
     zw,
     dzt,
@@ -266,6 +341,7 @@ def build_model(
     shortwave_efold1: float = 0.35,
     shortwave_efold2: float = 23.0,
     ocean_initial_surface_temperature: float = 10.0,
+    ocean_initial_condition_file: str | None = None,
     land_clim_file: str = "forcing_era5_t31.nc",
     jcm_advection: str | None = None,
     seaice_transport: bool = True,
@@ -298,6 +374,11 @@ def build_model(
     `ocean_initial_surface_temperature`: surface value (deg C) of the
     cold-start ocean temperature, a linear profile decreasing to 0 at the
     bottom. Ignored when resuming from a checkpoint.
+
+    `ocean_initial_condition_file`: start the ocean from the temperature and
+    salinity in this file instead (see `_ocean_initial_condition`); it
+    overrides `ocean_initial_surface_temperature`. Ignored when resuming from
+    a checkpoint.
 
     `land_background_albedo`: uniform snow-free land albedo passed to JCM as
     `alb0`. JCM adds snow on top (`alb0 + snowc * (albsn - alb0)`). Without
@@ -399,7 +480,13 @@ def build_model(
         print(f"Deleting: {f}")
         os.remove(f)
    
-    ocean_grid = "JCM_T31"#RotatedGaussianLatLon" 
+    ocean_grid = "JCM_T31"#RotatedGaussianLatLon"
+    ocean_ddz = _geometric_stretched_ddz(n_layers=30, surface_thickness=ocean_surface_thickness, total_depth=5200.0)[:number_of_ocean_layers]
+    if ocean_initial_condition_file is not None:
+        initial_temp_salt = _ocean_initial_condition(
+            ocean_initial_condition_file, ocean_ddz, grid_folder / f"ocn_topo_{ocean_grid:s}.nc")
+    else:
+        initial_temp_salt = None
     # `generateVerosSetup` needs raw file access (native_lat/native_lon axis
     # metadata that isn't part of a `Domain`'s in-memory land_fraction/mask
     # arrays), so it's handed the  grid/mask files directly rather than
@@ -424,8 +511,9 @@ def build_model(
         # `enable_shortwave_penetration` and
         # `_shortwave_penetration_divergence`, which spread it over the
         # top ~`shortwave_efold2` metres instead.
-        ddz=_geometric_stretched_ddz(n_layers=30, surface_thickness=ocean_surface_thickness, total_depth=5200.0)[:number_of_ocean_layers],
+        ddz=ocean_ddz,
         cold_start_ocean_temperature_reference_K=ocean_initial_surface_temperature,
+        initial_temp_salt=initial_temp_salt,
     )()
     ocn_model.setup()
     ocn_component = VerosComponent(ocn_model)
