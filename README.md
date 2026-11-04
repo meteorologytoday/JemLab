@@ -4,8 +4,7 @@ This project is a testbed for [JAX-ESM (JEM)](https://github.com/climate-analyti
 
 # Quickstart
 
-Install
-
+Clone and set path
 ```
 git clone -b fix-sea-ice-temperature-blending https://github.com/climate-analytics-lab/jax-gcm.git
 git clone -b dev0.1 https://github.com/climate-analytics-lab/jax-esm.git
@@ -16,6 +15,18 @@ jem_path=`pwd`/jax-esm
 veros_path=`pwd`/veros-jittable
 
 export PYTHONPATH=$jcm_path:$jem_path:$veros_path
+```
+OR install
+```
+git clone -b fix-sea-ice-temperature-blending https://github.com/climate-analytics-lab/jax-gcm.git
+git clone -b dev1.0 https://github.com/climate-analytics-lab/jax-esm.git
+git clone https://github.com/meteorologytoday/veros-jittable.git
+
+for repo in jax-gcm jax-esm veros-jittable ; do
+  pushd $repo
+  pip install -e .
+  popd
+done
 ```
 
 Run
