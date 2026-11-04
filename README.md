@@ -11,7 +11,7 @@ git clone -b fix-sea-ice-temperature-blending https://github.com/climate-analyti
 git clone -b dev0.1 https://github.com/climate-analytics-lab/jax-esm.git
 git clone https://github.com/meteorologytoday/veros-jittable.git
 
-jcm_path=`pwd`/jcm
+jcm_path=`pwd`/jax-gcm
 jem_path=`pwd`/jax-esm
 veros_path=`pwd`/veros-jittable
 
