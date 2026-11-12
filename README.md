@@ -7,7 +7,7 @@ This project is a testbed for [JAX-ESM (JEM)](https://github.com/climate-analyti
 Clone and set path
 ```
 git clone -b fix-sea-ice-temperature-blending https://github.com/climate-analytics-lab/jax-gcm.git
-git clone -b dev0.1 https://github.com/climate-analytics-lab/jax-esm.git
+git clone -b dev1.0 https://github.com/climate-analytics-lab/jax-esm.git
 git clone https://github.com/meteorologytoday/veros-jittable.git
 
 jcm_path=`pwd`/jax-gcm
