@@ -108,7 +108,6 @@ result = jem.run_chunked(
     total_time=f"{args.total_simulation_days:d} days",
     chunk=f"{args.simulation_interval_days:d} days",
     output_dir=output_dir,
-    initial_carry=initial_carry,
     output_averages=not args.do_not_average_time,
     checkpoint_interval=f"{args.checkpoint_interval * args.simulation_interval_days:d} days",
 )
