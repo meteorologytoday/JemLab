@@ -40,5 +40,8 @@ git clone -b dev0.1 https://github.com/meteorologytoday/JemLab.git
 cd JemLab/case_jcm_veros_topo-realistic-collocated
 bash run.sh
 ```
-
+Check output
+```
+ls output_T31/spinup
+```
 
