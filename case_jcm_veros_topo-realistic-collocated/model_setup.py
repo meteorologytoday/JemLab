@@ -15,6 +15,8 @@ import jcm
 import jcm.constants as jcm_constants
 from jcm.physics.speedy.speedy_coords import get_speedy_coords
 from jcm.terrain import TerrainData
+from jcm.forcing import default_forcing
+from jcm.physics.surface.speedy_surface_flux import SEA_ICE_FREEZING_TEMPERATURE
 from jcm.dycore.dinosaur.dycore import DinosaurDycore
 from jcm.physics.speedy.params import Parameters
 from jcm.physics.speedy.speedy_terms import speedy_physics
@@ -345,6 +347,11 @@ def build_model(
     land_clim_file: str = "forcing_era5_t31.nc",
     jcm_advection: str | None = None,
     seaice_transport: bool = True,
+    runoff_to_ocean_mapping: None = None,
+    ocean_eq_of_state_type: int = 5,
+    land_surface_temperature_from_clim_file: bool = True,
+    land_soil_water_availability_from_clim_file: bool = True,
+    vegetation_fraction_from_clim_file: bool = True,
 ):
     """Build the coupled JCM + Veros + SlabLand + Winton sea-ice system.
 
@@ -442,7 +449,15 @@ def build_model(
     if freeze_season_at_day is not None:
         _freeze_season(raw_atm_model, freeze_season_at_day)
     
-    atm_component = JCMComponent(raw_atm_model)
+    # JCM's `sea_ice_temperature` forcing is optional (None: the flux code
+    # caps the SST at freezing under ice instead). Here the coupler writes the
+    # Winton ice's skin temperature into it every step, so the carry must hold
+    # an array from the start; it starts at SPEEDY's sea-ice freezing point
+    # and is overwritten at the first exchange.
+    atm_forcing = default_forcing(raw_atm_model.coords.horizontal)
+    atm_forcing = atm_forcing.replace(sea_ice_temperature=jnp.full(
+        raw_atm_model.coords.nodal_shape[1:], SEA_ICE_FREEZING_TEMPERATURE))
+    atm_component = JCMComponent(raw_atm_model, forcing=atm_forcing)
     atm_D2_nodal_shape = raw_atm_model.coords.nodal_shape[1:]
     
     lon_deg = raw_atm_model.coords.horizontal.longitudes * 180 / jnp.pi
@@ -460,18 +475,19 @@ def build_model(
     lnd_component = SlabLandModel(
         slab_grid,
         SlabLandParameters(
-            temperature_relaxation_timescale=86400.0 * 10,
-            drainage_timescale=jnp.asarray([86400.0 * 180.0,]),
+            temperature_relaxation_timescale=3600.0,
+            drainage_timescale=jnp.asarray([86400.0 * 2.0, 86400.0 * 60.0]),
         ),
+        runoff_to_ocean_mapping = runoff_to_ocean_mapping,
         land_clim_file = land_clim_file,
-        land_surface_temperature_from_clim_file = True,
-        soil_water_content_from_clim_file = True,
+        land_surface_temperature_from_clim_file = land_surface_temperature_from_clim_file,
+        soil_water_availability_from_clim_file = land_soil_water_availability_from_clim_file,
+        vegetation_fraction_from_clim_file = vegetation_fraction_from_clim_file,
         snow_depth_from_clim_file = True,
         surface_albedo_from_clim_file = True,
         land_surface_temperature_varname_in_clim_file = "stl",
-        soil_water_content_varname_in_clim_file = "soilw_am",
+        soil_water_availability_varname_in_clim_file = "soilw_am",
         snow_depth_varname_in_clim_file = "snowc",
-
     )
 
     # Create Veros
@@ -514,6 +530,7 @@ def build_model(
         ddz=ocean_ddz,
         cold_start_ocean_temperature_reference_K=ocean_initial_surface_temperature,
         initial_temp_salt=initial_temp_salt,
+        eq_of_state_type=ocean_eq_of_state_type,
     )()
     ocn_model.setup()
     ocn_component = VerosComponent(ocn_model)
@@ -614,6 +631,7 @@ def build_model(
         ocean_heat_flux = atm["derived"].total_heat_flux
         freshwater_flux = atm["derived"].total_freshwater_flux
 
+
         # ===== penetrating shortwave radiation begin =====
         # JCM's sea-surface net heat flux is
         #   hfluxn[:, :, 1] = rsds*(1 - alb_s) + rlds - (rlus + shf + alhc*evap)
@@ -692,11 +710,11 @@ def build_model(
             sea_surface_temperature = sea_surface_temperature,
             # SPEEDY blends it with the SST by `sice_am`.
             sea_ice_temperature = seaice["derived"].ice_surface_temperature_K,
-            alb0=lnd["state"].surface_albedo,
+            alb0=lnd["derived"].surface_albedo,
             sice_am=seaice["state"].ice_fraction,
             stl_am=atmgrid_stl_am,
             snowc_am=lnd["state"].snow_cover,
-            soilw_am=lnd["state"].soil_water_content[:, :, 0],
+            soilw_am=lnd["derived"].soil_water_availability,
         ))
 
         seaice_forcing = seaice["forcing"]
@@ -716,23 +734,33 @@ def build_model(
         lnd = dict(lnd, forcing=lnd["forcing"].replace(
             total_heat_flux=atm["derived"].total_heat_flux,
             precipitation=atm["derived"].precipitation,
+            evaporation=atm["derived"].evaporation,
         ))
 
         ocn_forcing = ocn["forcing"]
         ocn = dict(ocn, forcing=ocn_forcing.replace(
             surface_taux=surface_taux,
             surface_tauy=surface_tauy,
+            
             # The atmosphere's flux minus what the ice absorbed, plus what the
             # ice passes down (transmitted shortwave, melt surplus), minus the
             # basal heat the ice draws. Upward positive, like `heat_flux`.
-            # Veros only reports its freeze/melt potential and does not reset
-            # the top cell to freezing; `ocean_heat_flux_up` already hands
-            # back the latent heat of the frazil ice made from it.
-            heat_flux=seaice["derived"].ocean_heat_flux_up.astype(ocn_forcing.heat_flux.dtype),
-            # The cell's E - P minus the water now stored in ice and snow
-            # (snow that landed on ice reaches the ocean only when it melts),
-            # assembled by the ice from the forcing above.
-            freshwater_flux=seaice["derived"].ocean_freshwater_flux_up.astype(ocn_forcing.freshwater_flux.dtype),
+            # Veros clamps its top cell at freezing and reports the heat that
+            # took as `ice_frazil_melt_energy`, which the ice turns into frazil
+            # ice; `ocean_heat_flux_up` leaves that latent heat out, since the
+            # clamp already supplied it.
+            heat_flux=seaice["derived"].ocean_heat_flux_up,
+            
+            # The ice sits between the atmosphere and the ocean: it takes the
+            # atmosphere's E - P, holds back the water now stored in ice and
+            # snow (snow that landed on ice reaches the ocean only when it
+            # melts), and what results is all the atmospheric water the ocean
+            # receives. So the ocean's own precipitation and evaporation stay
+            # zero and the ice's upward flux arrives through the sea-ice
+            # channel, positive into the ocean. The land's runoff has its own
+            # channel, also positive into the ocean.
+            sea_ice_freshwater_flux=-seaice["derived"].ocean_freshwater_flux_up,
+            runoff=lnd["derived"].runoff_to_ocean.astype(ocn_forcing.runoff.dtype),
         ))
  
         updated_components = dict(components, atm=atm, ocn=ocn, lnd=lnd, seaice=seaice)

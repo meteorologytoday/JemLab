@@ -160,6 +160,7 @@ def generateVerosSetup(
     dt_tracer: float = 1800.0,
     cold_start_ocean_temperature_reference_K: float = 10.0,
     initial_temp_salt: tuple | None = None,
+    eq_of_state_type: int = 1,
 ):
     # Cold-start temperature: a linear profile from
     # `cold_start_ocean_temperature_reference_K` (deg C despite the name) at
@@ -169,6 +170,9 @@ def generateVerosSetup(
     # pair of (nx, ny, nz) arrays in deg C and psu, layers bottom-first like
     # Veros, already on this grid (see `_ocean_initial_condition` in
     # model_setup.py).
+    #
+    # `eq_of_state_type` is Veros' `settings.eq_of_state_type`: 1 linear,
+    # 5 TEOS-10 (Veros' gsw polynomial, as its own global setups use).
 
     grid_info = GridInfo(
         rotated_grid = rotated_grid,
@@ -255,7 +259,7 @@ def generateVerosSetup(
 
             settings.enable_idemix = False
 
-            settings.eq_of_state_type = 1
+            settings.eq_of_state_type = eq_of_state_type
 
             # Allocates `temp_source`/`salt_source` and makes
             # `thermodynamics` apply them (veros/core/diffusion.py
