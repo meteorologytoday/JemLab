@@ -11,7 +11,7 @@ time python3 main_forward.py \
     --total-simulation-days $(( 365 * 5 ))          \
     --simulation-name  spinup                       \
     --grid-folder $grid_folder                      \
-    --ocean-initial-surface-temperature $ocean_init_file \
+    --ocean-initial-condition-file $ocean_init_file \
     --land-forcing-file $land_forcing_file          \
     --runoff-to-ocean-mapping $runoff_to_ocean_mapping \
     --land-free-temperature                         \
