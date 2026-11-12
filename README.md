@@ -4,6 +4,11 @@ This project is a testbed for [JAX-ESM (JEM)](https://github.com/climate-analyti
 
 # Quickstart
 
+Set up a new environment with [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install) or [miniconda](https://continuumio-docs.readthedocs-hosted.com/miniconda/install/)
+```
+conda create -n jemlab python=3.13 -y
+conda activate jemlab
+```
 Clone and set path
 ```
 git clone -b fix-sea-ice-temperature-blending https://github.com/climate-analytics-lab/jax-gcm.git
