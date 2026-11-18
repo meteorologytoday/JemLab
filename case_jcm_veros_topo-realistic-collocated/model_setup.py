@@ -135,35 +135,6 @@ def _atmosphere_forcing_for_ice(atm_derived, sigma_bottom):
     }
 
 
-def _freeze_season(raw_atm_model, freeze_season_at_day):
-    """Pin `atm_model`'s seasonal (day-of-year) forcing to a fixed day, while
-    leaving the diurnal (time-of-day) cycle running.
-
-    `jcm.model.Model._date_from_sim_time` turns elapsed `sim_time` into a
-    `DateData`; its "days" component sets the season (`tyear`/`orbital_phase`
-    in `jcm.forcing._solar_from_date`, and any climatological `TimeSeries`
-    forcing sliced by `ForcingData.select`), while its "seconds-within-day"
-    component sets the diurnal phase (`synodic_phase`). Replacing only the
-    days component -- with the real `sim_time % 86400` still feeding the
-    seconds component -- freezes the season (the sun stops advancing past
-    `freeze_season_at_day`) without freezing day/night.
-
-    This monkey-patches the *instance*, not the `jcm.model.Model` class:
-    Python attribute lookup checks the instance's `__dict__` before the
-    class's, so `atm_model._date_from_sim_time` (called internally as
-    `self._date_from_sim_time(...)`) resolves to this wrapper without
-    touching the `jcm` package itself.
-    """
-    original_date_from_sim_time = atm_model._date_from_sim_time
-    frozen_days_seconds = freeze_season_at_day * 86400.0
-
-    def frozen_date_from_sim_time(sim_time):
-        seconds_of_day = sim_time % 86400.0
-        return original_date_from_sim_time(frozen_days_seconds + seconds_of_day)
-
-    atm_model._date_from_sim_time = frozen_date_from_sim_time
-
-
 def _geometric_stretched_ddz(n_layers: int, surface_thickness: float, total_depth: float, tol: float = 1e-9):
     """Vertical layer thicknesses for a constant-ratio ("geometric")
     stretched z-grid: dz[k] = surface_thickness * ratio**k for
@@ -335,7 +306,6 @@ def build_model(
     jcm_dt=1800.0,
     number_of_ocean_layers=None,
     debug_mode=False,
-    freeze_season_at_day=None,
     grid_folder: str,
     ocean_surface_thickness: float = 10.0,
     enable_shortwave_penetration: bool = True,
@@ -359,11 +329,6 @@ def build_model(
     together with a `config` dict of supporting objects, so that callers can
     build exactly the same model. The clock is `jax_datetime`'s proleptic
     Gregorian calendar -- neither JCM nor the `Coupler` offers another.
-
-    `freeze_season_at_day`: if not `None`, the number of days after
-    `start_datetime` at which to freeze the atmosphere's seasonal (solar and
-    climatological-forcing) cycle -- e.g. `0` pins it at `start_datetime`
-    itself. The diurnal cycle keeps advancing normally. See `_freeze_season`.
 
     `enable_shortwave_penetration`: let the absorbed solar flux be deposited
     over a finite depth range instead of entirely in the 's top layer,
@@ -446,8 +411,6 @@ def build_model(
             physics=atm_physics,
             start_time=start_datetime,
         )
-    if freeze_season_at_day is not None:
-        _freeze_season(raw_atm_model, freeze_season_at_day)
     
     # JCM's `sea_ice_temperature` forcing is optional (None: the flux code
     # caps the SST at freezing under ice instead). Here the coupler writes the
@@ -825,8 +788,4 @@ def build_model(
         workflow=["mapper", "atm", "ocn", "lnd", "seaice"],
     )
 
-    config = dict(
-        coords=coords,
-    )
-
-    return model, config
+    return model

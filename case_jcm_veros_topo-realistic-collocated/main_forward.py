@@ -66,7 +66,7 @@ output_dir.mkdir(exist_ok=True, parents=True)
 # Build the coupled JCM + Veros + fake-land system. Packaged as a function
 # in `model_setup.py` so that other scripts (e.g. a jax.grad sensitivity
 # experiment) can build exactly the same model.
-model, config = build_model(
+model = build_model(
     truncation_number=truncation_number,
     start_datetime=start_datetime,
     coupling_timestep=coupling_timestep,
